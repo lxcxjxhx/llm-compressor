@@ -6,7 +6,7 @@ Common functions for interfacing with python primitives and directories/files.
 import contextlib
 import importlib
 import re
-from typing import Any
+from typing import Any, Iterable
 
 import torch
 from compressed_tensors.quantization import disable_quantization, enable_quantization
@@ -25,6 +25,7 @@ __all__ = [
     "disable_hf_kernels",
     "calibration_forward_context",
     "disable_lm_head",
+    "numeric_sorted_names",
     "hasattr_fallbacks",
     "getattr_fallbacks",
     "hasitem_fallbacks",
@@ -196,6 +197,32 @@ def disable_lm_head(model: torch.nn.Module):
                 stack.enter_context(patch_attr(model._hf_hook, "io_same_device", False))
 
             yield
+
+
+def numeric_sorted_names(names: Iterable[str]) -> list[str]:
+    """
+    Sort names by their numeric components, so that e.g. `layers.10` sorts
+    after `layers.2` rather than before it (as a plain lexicographic sort
+    would do).
+
+    MoE layer names must be ordered like the model's layers, since per-layer
+    lists (saliency reports, expert-sparsity configs) are matched positionally
+    against the model's layer order.
+
+    :param names: an iterable of names, or a mapping keyed by name
+    :return: the names in numeric order
+    """
+
+    def sort_key(name: str) -> tuple:
+        # split into digit and non-digit runs, comparing digit runs as
+        # integers; each run is tagged so that ints never compare against
+        # strings (which would raise a TypeError)
+        return tuple(
+            (0, int(run), "") if run.isdigit() else (1, 0, run)
+            for run in re.split(r"(\d+)", name)
+        )
+
+    return sorted(names, key=sort_key)
 
 
 def hasattr_fallbacks(
